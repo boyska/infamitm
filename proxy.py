@@ -1,8 +1,6 @@
 #!/usr/bin/python
 """A basic transparent HTTP proxy"""
 
-__author__ = "Erik Johansson"
-__email__  = "erik@ejohansson.se"
 __license__= """
 Copyright (c) 2012 Erik Johansson <erik@ejohansson.se>
  
@@ -26,8 +24,11 @@ USA
 from twisted.web import http
 from twisted.internet import reactor, protocol
 from twisted.python import log
+from urlparse import urlsplit, urlunsplit
 import re
 import sys
+import time
+import signal
 
 log.startLogging(sys.stdout)
 
@@ -37,12 +38,12 @@ class ProxyClient(http.HTTPClient):
     form.
     """
 
-    def __init__(self, method, uri, postData, headers, originalRequest):
+    def __init__(self, method, uri, postData, headers, session):
         self.method = method
         self.uri = uri
         self.postData = postData
         self.headers = headers
-        self.originalRequest = originalRequest
+        self.session = session
         self.contentLength = None
 
     def sendRequest(self):
@@ -73,49 +74,58 @@ class ProxyClient(http.HTTPClient):
 
     def handleStatus(self, version, code, message):
         log.msg("Got server response: %s %s %s" % (version, code, message))
-        self.originalRequest.setResponseCode(int(code), message)
+        self.session.request.setResponseCode(int(code), message)
 
     def handleHeader(self, key, value):
         if key.lower() == 'content-length':
             self.contentLength = value
         else:
-            self.originalRequest.responseHeaders.addRawHeader(key, value)
+            self.session.request.responseHeaders.addRawHeader(key, value)
 
     def handleResponse(self, data):
-        data = self.originalRequest.processResponse(data)
+        data = self.session.postResponse(data)
 
-        if self.contentLength != None:
-            self.originalRequest.setHeader('Content-Length', len(data))
+        self.session.request.setHeader('Content-Length', len(data))
 
-        self.originalRequest.write(data)
+        self.session.request.write(data)
 
-        self.originalRequest.finish()
+        self.session.request.finish()
         self.transport.loseConnection()
 
 class ProxyClientFactory(protocol.ClientFactory):
-    def __init__(self, method, uri, postData, headers, originalRequest):
+    def __init__(self, method, uri, postData, headers, session):
         self.protocol = ProxyClient
         self.method = method
         self.uri = uri
         self.postData = postData
         self.headers = headers
-        self.originalRequest = originalRequest
+        self.session = session
 
     def buildProtocol(self, addr):
         return self.protocol(self.method, self.uri, self.postData,
-                             self.headers, self.originalRequest)
+                             self.headers, self.session)
 
     def clientConnectionFailed(self, connector, reason):
         log.err("Server connection failed: %s" % reason)
-        self.originalRequest.setResponseCode(504)
-        self.originalRequest.finish()
-
+        self.session.setResponseCode(504)
+        self.session.finish()
+ 
 class ProxyRequest(http.Request):
     def __init__(self, channel, queued, reactor=reactor):
         http.Request.__init__(self, channel, queued)
         self.reactor = reactor
 
     def process(self):
+        log.msg('PROCESS: %s' % id(self))
+        log.msg('URI:%s PATH %s' % (self.uri, self.path + str(self.args)))
+        log.msg('Request:\n\t%s' % '\n\t'.join(
+                ('%s\t%s' % (x[0],';'.join(x[1])) for x in
+                self.requestHeaders.getAllRawHeaders())
+            )
+        )
+        session = Session(self)
+
+        session.preRequest()
         host = self.getHeader('host')
         if not host:
             log.err("No host header given")
@@ -127,17 +137,24 @@ class ProxyRequest(http.Request):
         if ':' in host:
             host, port = host.split(':')
             port = int(port)
-
         self.setHost(host, port)
+
+        log.msg('URI:%s PATH %s' % (self.uri, self.path + str(self.args)))
+        log.msg('Request:\n\t%s' % '\n\t'.join(
+                ('%s\t%s' % (x[0],';'.join(x[1])) for x in
+                self.requestHeaders.getAllRawHeaders())
+            )
+        )
 
         self.content.seek(0, 0)
         postData = self.content.read()
         factory = ProxyClientFactory(self.method, self.uri, postData,
                                      self.requestHeaders.getAllRawHeaders(),
-                                     self)
+                                     session)
         self.reactor.connectTCP(host, port, factory)
 
     def processResponse(self, data):
+        data = data.upper()
         return data
 
 class TransparentProxy(http.HTTPChannel):
@@ -145,6 +162,32 @@ class TransparentProxy(http.HTTPChannel):
  
 class ProxyFactory(http.HTTPFactory):
     protocol = TransparentProxy
- 
-reactor.listenTCP(8080, ProxyFactory())
-reactor.run()
+
+
+class Session(object):
+    pre = None
+    post = None
+    def __init__(self, request):
+        self.pre = self.__class__.pre
+        self.post = self.__class__.post
+        self.request = request
+
+    def preRequest(self):
+        if self.pre is not None:
+            return self.pre(self)
+    def postResponse(self, data):
+        if self.post is not None:
+            return self.post(self, data)
+        return data
+
+
+if __name__ == '__main__':
+    configpath = sys.argv[1]
+    def load_config():
+        log.msg('Reloaded config: %s' % configpath)
+        execfile(configpath)
+    load_config()
+    signal.signal(signal.SIGHUP, lambda sig,stack: load_config())
+
+    reactor.listenTCP(8080, ProxyFactory())
+    reactor.run()
