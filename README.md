@@ -1,4 +1,4 @@
-Transparent HTTP proxy
+About infamitm
 ======================
 
 A **customizable** transparent HTTP proxy: by default it just behave as a transparent proxy, but it is easy to add custom behaviours like logging, rewriting, banning.
@@ -11,8 +11,22 @@ To make it transparent:
 
     iptables -t nat -A PREROUTING -s $CLIENT_IP -p tcp --dport 80 -j REDIRECT --to-port 8080
 
-Customizing
----------
+If you want to change configuration at runtime, just edit your file, then
+
+    kill -HUP [pid]
+
+Hacking
+===========
+
+Code structure
+---------------
+
+In `proxy.py` you'll find basic transparent proxy configuration. What you
+should really care about is your configuration file (`config.py`): here the
+"custom behaviours" are defined. See _Customizing_ for more info.
+
+Theory
+-------
 
 For each request, an object Session is created:
 
@@ -35,11 +49,19 @@ are not permanent.
 
 By default, this is just a normal, transparent proxy.
 
-If you want to be able to run a "custom" one, just set some functions as
-preRequest/postResponse
+Customizing
+------------
+
+In your `config.py` (or whatever you want to call it) you should define your
+custom behaviours.
+
+This basically requires defining new "pre" and "post" functions `preRequest` /
+`postResponse`
+
+See the `samples/` directory for examples.
 
 TODO
------
+=====
 
 * More/better support for different "layers" of interaction (ie: to support
   logging more easily, and make it easy to "combine" different "modules"
