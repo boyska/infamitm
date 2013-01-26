@@ -1,14 +1,13 @@
 Transparent HTTP proxy
 ======================
 
-A basic transparent HTTP proxy that can sit between a client and HTTP servers,
-proxying requests from the client and rewriting the returned resource.
+A **customizable** transparent HTTP proxy: by default it just behave as a transparent proxy, but it is easy to add custom behaviours like logging, rewriting, banning.
 
-Much inspiration taken from
-[sergio-proxy](https://code.google.com/p/sergio-proxy/).
+Installation
+-------------
 
-It is enabled on the gateway (in my case for a single client) by a simple
-iptables rule:
+Just run `python2 proxy.py config.py` and it will sit on port 8080.
+To make it transparent:
 
     iptables -t nat -A PREROUTING -s $CLIENT_IP -p tcp --dport 80 -j REDIRECT --to-port 8080
 
@@ -51,5 +50,3 @@ TODO
   - Based on Cookie
     + Give a tracking cookie to user
 	+ Use a site-specific tracking cookie (like PHPSESSID) and just checks it
-
-
